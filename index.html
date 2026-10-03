@@ -69,6 +69,7 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
   <button role="tab" data-tab="setup">Setup</button>
 </nav>
 <main>
+<div id="touchLock" style="display:none;position:fixed;inset:0;z-index:50;background:rgba(28,34,39,.6);touch-action:none"><p class="sub" style="position:absolute;left:0;right:0;top:40%;text-align:center;font-size:20px;color:var(--ink)" id="touchLockMsg">capturing, hands off</p></div>
 
 <section id="tab-live" class="on">
   <div class="readout"><span id="liveTilt">--</span><small>° tilt</small></div>
@@ -409,14 +410,20 @@ const beepStart = () => beep(600, 180, 1);
 const beepCapture = () => beep(880, 120, 1);
 const beepDone = () => beep(1175, 90, 2, 70);
 const delaySec = () => parseFloat($("setDelay").value)||0;
-// timed capture: start beep, wait, capturing beep, average, done beep
+let busy = false, faceDown = false;
+function touchLock(){ const el = $("touchLock"); const on = busy || faceDown; el.style.display = on ? "block" : "none"; $("touchLockMsg").textContent = busy ? "capturing, hands off" : "screen down, touch ignored"; }
+["touchstart","touchmove","touchend","pointerdown","click"].forEach(ev => $("touchLock").addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); }, {passive:false}));
+// timed capture: start beep, wait, capturing beep, average, done beep. Touches are blocked from the first beep to the last.
 async function timedCapture(getter, waitSec, onProgress){
-  beepStart();
-  await countdown(waitSec);
-  beepCapture();
-  const v = await average(getter, avgSec(), onProgress);
-  beepDone();
-  return v;
+  busy = true; touchLock();
+  try{
+    beepStart();
+    await countdown(waitSec);
+    beepCapture();
+    const v = await average(getter, avgSec(), onProgress);
+    beepDone();
+    return v;
+  } finally { busy = false; touchLock(); }
 }
 
 // ---------- captures (raw data for review) ----------
@@ -462,8 +469,8 @@ async function ghUploadSession(statusEl){
 let recRaw = null;
 async function startRaw(seconds){
   const raw = []; let tt = 0;
-  beepStart(); await countdown(delaySec()); beepCapture();
-  const fn = (a,g,dt) => { tt += dt; raw.push([+tt.toFixed(4), ...a.map(v=>+v.toFixed(4)), ...g.map(v=>+v.toFixed(4))]); $("rawStatus").textContent = "recording " + tt.toFixed(1) + " s"; if(tt >= seconds){ listeners.delete(fn); addCapture("raw", {note:$("rawNote").value, seconds}, null, raw); $("rawStatus").textContent = "saved " + raw.length + " samples"; beepDone(); } };
+  busy = true; touchLock(); beepStart(); await countdown(delaySec()); beepCapture();
+  const fn = (a,g,dt) => { tt += dt; raw.push([+tt.toFixed(4), ...a.map(v=>+v.toFixed(4)), ...g.map(v=>+v.toFixed(4))]); $("rawStatus").textContent = "recording " + tt.toFixed(1) + " s"; if(tt >= seconds){ listeners.delete(fn); addCapture("raw", {note:$("rawNote").value, seconds}, null, raw); $("rawStatus").textContent = "saved " + raw.length + " samples"; beepDone(); busy = false; touchLock(); } };
   listeners.add(fn);
 }
 
@@ -492,7 +499,10 @@ function toeAdvice(totalDeg, targetIn, dia){
 
 // ---------- live ----------
 let flatRef = null;
+let fdCount = 0;
 listeners.add((a,g) => {
+  const fd = a[2] < -4; fdCount = fd ? Math.min(fdCount+1, 20) : 0;
+  const nowFD = fdCount >= 10; if(nowFD !== faceDown){ faceDown = nowFD; touchLock(); }
   $("liveTilt").textContent = fmt(tiltZ(a));
   $("liveAcc").textContent = a.map(v=>v.toFixed(2)).join(" / ");
   $("liveGyro").textContent = g.map(v=>v.toFixed(2)).join(" / ");
@@ -714,7 +724,7 @@ $("calPairClear").addEventListener("click", () => { calib.pairs=[]; calib.offset
 // C. gyro still
 $("calGyro").addEventListener("click", async () => {
   const raw=[]; let tt=0; const sum=[0,0,0]; let n=0;
-  beepStart(); await countdown(delaySec()); beepCapture();
+  busy = true; touchLock(); beepStart(); await countdown(delaySec()); beepCapture();
   $("calGyroS").textContent = "recording";
   const fn=(a,g,dt)=>{ tt+=dt; n++; for(let i=0;i<3;i++) sum[i]+=g[i]; raw.push([+tt.toFixed(4), ...a.map(v=>+v.toFixed(4)), ...g.map(v=>+v.toFixed(4))]); $("calGyroS").textContent = "recording " + tt.toFixed(1) + " s";
     if(tt>=20){ listeners.delete(fn); const b = sum.map(v=>v/n); calib.gyroBias = b;
@@ -723,7 +733,7 @@ $("calGyro").addEventListener("click", async () => {
       const up = (()=>{ const m=norm(acc); return [acc[0]/m,acc[1]/m,acc[2]/m]; })();
       const dv = (b2[0]-b1[0])*up[0]+(b2[1]-b1[1])*up[1]+(b2[2]-b1[2])*up[2]; // deg/s change between halves (10 s apart)
       calib.gyroDrift = dv*60; // deg/min equivalent of bias wander
-      $("calGyroS").textContent = "done, " + raw.length + " samples"; beepDone();
+      $("calGyroS").textContent = "done, " + raw.length + " samples"; beepDone(); busy = false; touchLock();
       addCapture("calib", {step:"gyroStill", bias:b, drift:calib.gyroDrift}, null, raw); calSave(); } };
   listeners.add(fn);
 });
