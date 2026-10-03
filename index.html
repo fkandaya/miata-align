@@ -307,6 +307,7 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
 <section id="tab-setup">
   <label>Toe reference diameter for inch conversion (in) <input id="setDia" type="number" step="0.1" value="16.0"></label>
   <label>Averaging time per capture (s) <input id="setAvg" type="number" step="0.5" value="2" min="1" max="5"></label>
+  <label>Delay after tapping a capture button (s) <input id="setDelay" type="number" step="0.5" value="2" min="0" max="10"></label>
   <label>Countdown before screen-in capture (s) <input id="setCount" type="number" step="1" value="3" min="0" max="10"></label>
   <div class="panel">
     <p class="sub" style="margin:0 0 6px">Vehicle spec (targets). Results show green inside tolerance.</p>
@@ -400,7 +401,21 @@ function average(getter, seconds, onProgress){
 }
 const countdown = s => new Promise(res => setTimeout(res, s*1000));
 const avgSec = () => parseFloat($("setAvg").value)||2;
-function beep(){ try{ const c = new (window.AudioContext||window.webkitAudioContext)(); const o = c.createOscillator(); o.frequency.value = 880; o.connect(c.destination); o.start(); o.stop(c.currentTime+0.15);}catch(e){} }
+let audioCtx = null;
+function beep(freq=880, ms=150, count=1, gap=120){ try{ audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)(); if(audioCtx.state==="suspended") audioCtx.resume(); for(let i=0;i<count;i++){ const o = audioCtx.createOscillator(); const g = audioCtx.createGain(); o.frequency.value = freq; g.gain.value = 0.25; o.connect(g); g.connect(audioCtx.destination); const t0 = audioCtx.currentTime + i*(ms+gap)/1000; o.start(t0); o.stop(t0 + ms/1000); } }catch(e){} }
+const beepStart = () => beep(600, 180, 1);
+const beepCapture = () => beep(880, 120, 1);
+const beepDone = () => beep(1175, 90, 2, 70);
+const delaySec = () => parseFloat($("setDelay").value)||0;
+// timed capture: start beep, wait, capturing beep, average, done beep
+async function timedCapture(getter, waitSec, onProgress){
+  beepStart();
+  await countdown(waitSec);
+  beepCapture();
+  const v = await average(getter, avgSec(), onProgress);
+  beepDone();
+  return v;
+}
 
 // ---------- captures (raw data for review) ----------
 let captures = store.get("captures", []);
@@ -443,9 +458,10 @@ async function ghUploadSession(statusEl){
 }
 // raw recorder (Live tab)
 let recRaw = null;
-function startRaw(seconds){
+async function startRaw(seconds){
   const raw = []; let tt = 0;
-  const fn = (a,g,dt) => { tt += dt; raw.push([+tt.toFixed(4), ...a.map(v=>+v.toFixed(4)), ...g.map(v=>+v.toFixed(4))]); $("rawStatus").textContent = "recording " + tt.toFixed(1) + " s"; if(tt >= seconds){ listeners.delete(fn); addCapture("raw", {note:$("rawNote").value, seconds}, null, raw); $("rawStatus").textContent = "saved " + raw.length + " samples"; beep(); } };
+  beepStart(); await countdown(delaySec()); beepCapture();
+  const fn = (a,g,dt) => { tt += dt; raw.push([+tt.toFixed(4), ...a.map(v=>+v.toFixed(4)), ...g.map(v=>+v.toFixed(4))]); $("rawStatus").textContent = "recording " + tt.toFixed(1) + " s"; if(tt >= seconds){ listeners.delete(fn); addCapture("raw", {note:$("rawNote").value, seconds}, null, raw); $("rawStatus").textContent = "saved " + raw.length + " samples"; beepDone(); } };
   listeners.add(fn);
 }
 
@@ -521,12 +537,11 @@ function camCompute(){
 }
 $("camCorner").addEventListener("change", camCompute);
 async function camCapture(key){
-  const useCount = key==="in" ? (parseFloat($("setCount").value)||0) : 0;
-  if(useCount){ beep(); await countdown(useCount); }
+  const wait = key==="in" ? Math.max(delaySec(), parseFloat($("setCount").value)||0) : delaySec();
   const prog = p => $("camMeter").style.width = (p*100)+"%";
   // floor roll: phone flat, top edge toward centerline. Normal tilting outward = positive, so floor = -rollY.
-  const v = key==="floor" ? -(await average(a=>rollY(a), avgSec(), prog)) : await average(a=>tiltZ(a), avgSec(), prog);
-  beep(); camState()[key] = v; camCompute();
+  const v = key==="floor" ? -(await timedCapture(a=>rollY(a), wait, prog)) : await timedCapture(a=>tiltZ(a), wait, prog);
+  camState()[key] = v; camCompute();
   addCapture("camber", {corner:$("camCorner").value, key}, v, lastSamples);
   setTimeout(()=>$("camMeter").style.width="0", 500);
 }
@@ -549,10 +564,10 @@ listeners.add((a,g,dt) => {
   $("casSteer").textContent = fmt(steer, 1);
 });
 async function measureGyroBias(){ const b = [0,0,0]; for(let i=0;i<3;i++){ b[i] = await average((a,g)=>g[i], 1.5); } return b; }
-$("casZero").addEventListener("click", async () => { steerOn=false; $("casSteer").textContent="hold still"; gyroBias = [await average((a,g)=>g[0],1.5), await average((a,g)=>g[1],1.5), await average((a,g)=>g[2],1.5)]; steer=0; steerOn=true; beep(); });
+$("casZero").addEventListener("click", async () => { beepStart(); steerOn=false; $("casSteer").textContent="hold still"; gyroBias = [await average((a,g)=>g[0],1.5), await average((a,g)=>g[1],1.5), await average((a,g)=>g[2],1.5)]; steer=0; steerOn=true; beepDone(); });
 async function casCapture(side){
-  const v = await average(a=>tiltZ(a), avgSec());
-  cas[side] = v - (bias[$("casCorner").value]||0); beep(); casCompute();
+  const v = await timedCapture(a=>tiltZ(a), delaySec());
+  cas[side] = v - (bias[$("casCorner").value]||0); casCompute();
   addCapture("caster", {corner:$("casCorner").value, side, steer:+steer.toFixed(2), sweep:$("casSweep").value, bias:bias[$("casCorner").value]||0}, cas[side], lastSamples);
 }
 function casCompute(){
@@ -606,10 +621,10 @@ function headingOf(qq){
 }
 function setToe(id, v){ $(id).textContent = v; }
 $("toeStart").addEventListener("click", async () => {
-  integrating = false; setToe("toeHeading","hold still");
+  beepStart(); integrating = false; setToe("toeHeading","hold still");
   gyroBias = [await average((a,g)=>g[0],1.5), await average((a,g)=>g[1],1.5), await average((a,g)=>g[2],1.5)];
   upA = (() => { const n = norm(acc); return [acc[0]/n, acc[1]/n, acc[2]/n]; })();
-  q=[1,0,0,0]; resB=null; tStart=performance.now(); integrating=true; beep(); toeRaw=[]; toeT=0; window.__toeEvents=[];
+  q=[1,0,0,0]; resB=null; tStart=performance.now(); integrating=true; beepDone(); toeRaw=[]; toeT=0; window.__toeEvents=[];
   setToe("toeBias", gyroBias.map(v=>v.toFixed(3)).join(" / ")); setToe("toeTime","--"); setToe("toeTiltErr","--"); setToe("toeLoop","--"); setToe("toeRaw","--"); setToe("toeResult","--");
 });
 $("toeCapB").addEventListener("click", async () => {
@@ -622,7 +637,7 @@ $("toeCapB").addEventListener("click", async () => {
   // on the left wheel (A) the device x axis points rearward, so forward = -e2. Normals ideally opposite: c = -1.
   // total toe-in positive when the right wheel's normal tilts forward: s < 0 in this basis.
   const toeRaw = Math.atan2(-h.s, -h.c)*r2d;
-  resB = {toeRaw, tB, tiltErr}; beep(); window.__toeEvents.push({ev:"captureB", t:+toeT.toFixed(3), tB, tiltErr, toeRaw, q:qB});
+  resB = {toeRaw, tB, tiltErr}; beepDone(); window.__toeEvents.push({ev:"captureB", t:+toeT.toFixed(3), tB, tiltErr, toeRaw, q:qB});
   setToe("toeTime",(tB/1000).toFixed(1)+" s"); setToe("toeTiltErr", fmt(tiltErr,2)+"°"); setToe("toeRaw", fmt(toeRaw,2)+"°");
   showToe(toeRaw);
 });
@@ -681,13 +696,12 @@ function calSummary(){
 }
 // A. flat
 const flatAngle = a => Math.acos(Math.min(1, Math.abs(a[2]/norm(a))))*r2d * (a[2]>=0?1:-1);
-$("calUp").addEventListener("click", async () => { const v = await average(a=>flatAngle(a), avgSec()); beep(); calib.flatUp = v; addCapture("calib", {step:"flatUp"}, v, lastSamples); calSave(); });
-$("calDown").addEventListener("click", async () => { const v = await average(a=>flatAngle(a), avgSec()); beep(); calib.flatDown = v; addCapture("calib", {step:"flatDown"}, v, lastSamples); calSave(); });
+$("calUp").addEventListener("click", async () => { const v = await timedCapture(a=>flatAngle(a), delaySec()); calib.flatUp = v; addCapture("calib", {step:"flatUp"}, v, lastSamples); calSave(); });
+$("calDown").addEventListener("click", async () => { const v = await timedCapture(a=>flatAngle(a), delaySec()); calib.flatDown = v; addCapture("calib", {step:"flatDown"}, v, lastSamples); calSave(); });
 // B. pairs
 $("calPair").addEventListener("click", async () => {
-  const out = await average(a=>tiltZ(a), avgSec()); beep(); const sOut = lastSamples;
-  await countdown(parseFloat($("setCount").value)||3);
-  const inn = await average(a=>tiltZ(a), avgSec()); beep();
+  const out = await timedCapture(a=>tiltZ(a), delaySec()); const sOut = lastSamples;
+  const inn = await timedCapture(a=>tiltZ(a), Math.max(delaySec(), parseFloat($("setCount").value)||3));
   const pair = {angle:(out-inn)/2, off:(out+inn)/2, out, in:inn};
   calib.pairs = (calib.pairs||[]).concat([pair]).slice(-5);
   const offs = calib.pairs.map(p=>p.off); calib.offset = offs.reduce((x,y)=>x+y,0)/offs.length;
@@ -696,8 +710,9 @@ $("calPair").addEventListener("click", async () => {
 });
 $("calPairClear").addEventListener("click", () => { calib.pairs=[]; calib.offset=null; calib.offsetSpread=0; $("calPairSpread").textContent="--"; calSave(); });
 // C. gyro still
-$("calGyro").addEventListener("click", () => {
+$("calGyro").addEventListener("click", async () => {
   const raw=[]; let tt=0; const sum=[0,0,0]; let n=0;
+  beepStart(); await countdown(delaySec()); beepCapture();
   $("calGyroS").textContent = "recording";
   const fn=(a,g,dt)=>{ tt+=dt; n++; for(let i=0;i<3;i++) sum[i]+=g[i]; raw.push([+tt.toFixed(4), ...a.map(v=>+v.toFixed(4)), ...g.map(v=>+v.toFixed(4))]); $("calGyroS").textContent = "recording " + tt.toFixed(1) + " s";
     if(tt>=20){ listeners.delete(fn); const b = sum.map(v=>v/n); calib.gyroBias = b;
@@ -706,25 +721,25 @@ $("calGyro").addEventListener("click", () => {
       const up = (()=>{ const m=norm(acc); return [acc[0]/m,acc[1]/m,acc[2]/m]; })();
       const dv = (b2[0]-b1[0])*up[0]+(b2[1]-b1[1])*up[1]+(b2[2]-b1[2])*up[2]; // deg/s change between halves (10 s apart)
       calib.gyroDrift = dv*60; // deg/min equivalent of bias wander
-      $("calGyroS").textContent = "done, " + raw.length + " samples"; beep();
+      $("calGyroS").textContent = "done, " + raw.length + " samples"; beepDone();
       addCapture("calib", {step:"gyroStill", bias:b, drift:calib.gyroDrift}, null, raw); calSave(); } };
   listeners.add(fn);
 });
 // D. carry test (reuses toe integrator)
 let lapOn = false, lapT0 = 0;
 $("calLapStart").addEventListener("click", async () => {
-  integrating = false; $("calLapS").textContent = "hold still";
+  beepStart(); integrating = false; $("calLapS").textContent = "hold still";
   gyroBias = [await average((a,g)=>g[0],1.5), await average((a,g)=>g[1],1.5), await average((a,g)=>g[2],1.5)];
   upA = (()=>{ const m=norm(acc); return [acc[0]/m,acc[1]/m,acc[2]/m]; })();
-  q=[1,0,0,0]; resB=null; toeRaw=[]; toeT=0; tStart=performance.now(); integrating=true; lapOn=true; beep(); $("calLapS").textContent = "walking, come back to the same spot";
+  q=[1,0,0,0]; resB=null; toeRaw=[]; toeT=0; tStart=performance.now(); integrating=true; lapOn=true; beepDone(); $("calLapS").textContent = "walking, come back to the same spot";
 });
 $("calLapEnd").addEventListener("click", () => {
   if(!lapOn) return; lapOn=false; integrating=false;
   const h = headingOf(q); const err = h.yaw; const n = norm(acc); const upB = qrot(q,[acc[0]/n,acc[1]/n,acc[2]/n]);
   const tiltErr = Math.acos(Math.max(-1,Math.min(1, upB[0]*upA[0]+upB[1]*upA[1]+upB[2]*upA[2])))*r2d;
-  calib.laps = (calib.laps||[]).concat([err]).slice(-5);
+  calib.laps = (calib.laps||[]).concat([err]).slice(-5); beepDone();
   $("calLapS").textContent = "lap " + ((performance.now()-tStart)/1000).toFixed(1) + " s, heading error " + fmt(err,3) + "°, tilt error " + tiltErr.toFixed(2) + "°";
-  addCapture("calib", {step:"lap", err, tiltErr, seconds:(performance.now()-tStart)/1000, gyroBias, upA}, err, toeRaw); calSave(); beep();
+  addCapture("calib", {step:"lap", err, tiltErr, seconds:(performance.now()-tStart)/1000, gyroBias, upA}, err, toeRaw); calSave();
 });
 $("calReset").addEventListener("click", () => { if(confirm("Reset calibration?")){ calib={}; store.set("calib",calib); ["calUpV","calDownV","calFlatV","calPairs","calPairSpread","calOffset","calGyroS","calGyroB","calGyroD","calLapS","calLaps","calLapV"].forEach(i=>$(i).textContent="--"); ["sumAcc","sumOff","sumGyro","sumLap"].forEach(i=>{ $(i).textContent="not run"; $(i).className=""; }); } });
 calSummary();
