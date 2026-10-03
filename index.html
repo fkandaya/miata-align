@@ -65,6 +65,7 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
   <button role="tab" data-tab="toe">Toe (gyro)</button>
   <button role="tab" data-tab="strings">Toe (strings)</button>
   <button role="tab" data-tab="log">Log</button>
+  <button role="tab" data-tab="calib">Calibrate</button>
   <button role="tab" data-tab="setup">Setup</button>
 </nav>
 <main>
@@ -231,8 +232,75 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
     <p class="sub" style="margin:0 0 6px">Session export: every capture with its raw samples (<span id="capCount">0</span> stored). Share it to Claude for review.</p>
     <div class="grid2">
       <button class="act" id="exportBtn">Export session</button>
+      <button class="act" id="ghUpload">Upload to GitHub</button>
       <button class="quiet" id="capClear">Clear captures</button>
+      <button class="quiet" id="ghLast" disabled>Last upload: none</button>
     </div>
+  </div>
+</section>
+
+<section id="tab-calib">
+  <p class="sub">Four checks, no car needed. Results are saved and used as defaults. Phone bare, screen on, nothing touching the table.</p>
+
+  <div class="panel">
+    <p class="sub" style="margin:0 0 6px"><b>A. Flat check.</b> Phone flat on a table, screen up, capture. Flip it screen down, capture.</p>
+    <div class="grid2">
+      <button class="quiet" id="calUp">Capture screen up</button>
+      <button class="quiet" id="calDown">Capture screen down</button>
+    </div>
+    <table style="margin-top:6px">
+      <tr><td>Screen up</td><td id="calUpV">--</td></tr>
+      <tr><td>Screen down</td><td id="calDownV">--</td></tr>
+      <tr><td>Verdict</td><td id="calFlatV">--</td></tr>
+    </table>
+  </div>
+
+  <div class="panel">
+    <p class="sub" style="margin:0 0 6px"><b>B. Phone offset.</b> Lean the phone top-up against a wall or box, screen out. Tap Capture pair: it reads, beeps, gives you the countdown to flip it screen in, reads again. Do three pairs without moving the lean point.</p>
+    <div class="grid2">
+      <button class="quiet" id="calPair">Capture pair</button>
+      <button class="quiet" id="calPairClear">Clear pairs</button>
+    </div>
+    <table style="margin-top:6px">
+      <tr><td>Pairs (angle / offset)</td><td id="calPairs">--</td></tr>
+      <tr><td>Angle spread</td><td id="calPairSpread">--</td></tr>
+      <tr><td>Mean offset (saved)</td><td id="calOffset">--</td></tr>
+    </table>
+  </div>
+
+  <div class="panel">
+    <p class="sub" style="margin:0 0 6px"><b>C. Gyro stillness.</b> Phone flat and untouched for 20 s. Measures bias and how fast heading drifts when still.</p>
+    <div class="row"><button class="quiet" id="calGyro">Record 20 s still</button></div>
+    <table style="margin-top:6px">
+      <tr><td>Status</td><td id="calGyroS">--</td></tr>
+      <tr><td>Bias x / y / z (°/s)</td><td id="calGyroB">--</td></tr>
+      <tr><td>Heading drift after bias removal</td><td id="calGyroD">--</td></tr>
+    </table>
+  </div>
+
+  <div class="panel">
+    <p class="sub" style="margin:0 0 6px"><b>D. Carry test.</b> Stand the phone against a table edge, screen toward you. Start, hold still until the beep, pick it up, walk a slow lap, set it back on the same edge, tap Return. Repeat three times.</p>
+    <div class="grid2">
+      <button class="quiet" id="calLapStart">Start</button>
+      <button class="quiet" id="calLapEnd">Return</button>
+    </div>
+    <table style="margin-top:6px">
+      <tr><td>Status</td><td id="calLapS">--</td></tr>
+      <tr><td>Heading errors per lap</td><td id="calLaps">--</td></tr>
+      <tr><td>Verdict</td><td id="calLapV">--</td></tr>
+    </table>
+  </div>
+
+  <div class="panel">
+    <p class="sub" style="margin:0 0 6px"><b>Summary</b></p>
+    <table>
+      <tr><td>Accelerometer</td><td id="sumAcc">not run</td></tr>
+      <tr><td>Phone offset</td><td id="sumOff">not run</td></tr>
+      <tr><td>Gyro bias</td><td id="sumGyro">not run</td></tr>
+      <tr><td>Gyro toe usable</td><td id="sumLap">not run</td></tr>
+    </table>
+    <div class="grid2" style="margin-top:8px"><button class="act" id="calUpload">Upload to GitHub</button><button class="quiet" id="calReset">Reset calibration</button></div>
+    <p class="sub" id="calUploadS" style="margin:6px 0 0"></p>
   </div>
 </section>
 
@@ -260,6 +328,12 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
       <label>Steering arm length (mm) <input class="spec" data-k="arm" type="number" step="1" value="125"></label>
     </div>
     <p class="sub" id="specTurn" style="margin:6px 0 0"></p>
+  </div>
+  <div class="panel">
+    <p class="sub" style="margin:0 0 6px">GitHub sync. Uploads session files to the sessions folder of your repo so Claude can read them directly. The token stays on this phone only.</p>
+    <label>Repo <input id="ghRepo" value="fkandaya/miata-align"></label>
+    <label>Fine-grained token (Contents: read and write, this repo only) <input id="ghToken" type="password" placeholder="github_pat_..."></label>
+    <p class="sub" id="ghStatus" style="margin:6px 0 0">not configured</p>
   </div>
   <p class="sub">Jig convention: phone portrait, top up, screen facing away from the car. The phone's x axis then points toward the rear on the left side and toward the front on the right side. Flipping for the camber reversal is a rotation about the long axis so the screen faces the wheel.</p>
 </section>
@@ -336,13 +410,36 @@ function addCapture(type, meta, result, samples){
   store.set("captures", captures);
   const el = $("capCount"); if(el) el.textContent = captures.length;
 }
+function sessionData(){ return { exported:new Date().toISOString(), ua:navigator.userAgent, rateHz, settings:{dia:$("setDia").value, avg:$("setAvg").value, count:$("setCount").value}, calib, spec, log, captures }; }
+function sessionName(){ return "miata-align-" + new Date().toISOString().slice(0,16).replace(/[:T]/g,"-") + ".json"; }
 async function exportSession(){
-  const data = { exported:new Date().toISOString(), ua:navigator.userAgent, rateHz, settings:{dia:$("setDia").value, avg:$("setAvg").value, count:$("setCount").value}, log, captures };
+  const data = sessionData();
   const blob = new Blob([JSON.stringify(data)], {type:"application/json"});
-  const name = "miata-align-" + new Date().toISOString().slice(0,16).replace(/[:T]/g,"-") + ".json";
+  const name = sessionName();
   const file = new File([blob], name, {type:"application/json"});
   try{ if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:"Miata Align session"}); return; } }catch(e){ if(e.name==="AbortError") return; }
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+// GitHub upload (Contents API). Token lives only in this phone's localStorage.
+const gh = store.get("gh", {repo:"fkandaya/miata-align", token:""});
+function ghStatus(msg, cls){ const e=$("ghStatus"); if(e){ e.textContent = msg; e.className = "sub " + (cls||""); } }
+async function ghUploadSession(statusEl){
+  const say = (m, c) => { if(statusEl){ statusEl.textContent = m; statusEl.className = "sub " + (c||""); } ghStatus(m, c); };
+  if(!gh.token){ say("No token. Add one in Setup → GitHub sync.", "warn"); return; }
+  const name = sessionName(); const path = "sessions/" + name;
+  const json = JSON.stringify(sessionData());
+  const b64 = btoa(unescape(encodeURIComponent(json)));
+  say("uploading " + Math.round(json.length/1024) + " KB...");
+  try{
+    const r = await fetch("https://api.github.com/repos/" + gh.repo + "/contents/" + path, {
+      method:"PUT", headers:{ "Authorization":"Bearer " + gh.token, "Accept":"application/vnd.github+json", "Content-Type":"application/json" },
+      body: JSON.stringify({ message:"session " + name, content:b64 })
+    });
+    if(!r.ok){ const t = await r.text(); say("upload failed " + r.status + ": " + t.slice(0,120), "warn"); return; }
+    gh.last = name; store.set("gh", gh);
+    say("uploaded " + name, "ok");
+    const b=$("ghLast"); if(b){ b.textContent = "Last upload: " + name; }
+  }catch(e){ say("upload error: " + e.message, "warn"); }
 }
 // raw recorder (Live tab)
 let recRaw = null;
@@ -351,6 +448,9 @@ function startRaw(seconds){
   const fn = (a,g,dt) => { tt += dt; raw.push([+tt.toFixed(4), ...a.map(v=>+v.toFixed(4)), ...g.map(v=>+v.toFixed(4))]); $("rawStatus").textContent = "recording " + tt.toFixed(1) + " s"; if(tt >= seconds){ listeners.delete(fn); addCapture("raw", {note:$("rawNote").value, seconds}, null, raw); $("rawStatus").textContent = "saved " + raw.length + " samples"; beep(); } };
   listeners.add(fn);
 }
+
+// ---------- calibration store (early) ----------
+let calib = store.get("calib", {});
 
 // ---------- spec profile ----------
 const specDefaults = {camF:-1.75, camR:-1.75, cas:5.0, tolA:0.15, toeF:0.03, toeR:0.09, tolT:0.03, tolX:0.25, pitch:1.25, arm:125};
@@ -411,7 +511,7 @@ function camCompute(){
   $("camFloor").textContent = fmt(s.floor); $("camOut").textContent = fmt(s.out); $("camIn").textContent = fmt(s.in);
   let c = null;
   if(s.out!=null && s.in!=null){ c = (s.out - s.in)/2; const b = (s.out + s.in)/2; bias[$("camCorner").value] = b; store.set("bias", bias); $("camBias").textContent = fmt(b); }
-  else if(s.out!=null){ c = s.out - (bias[$("camCorner").value]||0); $("camBias").textContent = fmt(bias[$("camCorner").value]) + (bias[$("camCorner").value]!=null?" (reused)":""); }
+  else if(s.out!=null){ const b0 = bias[$("camCorner").value] != null ? bias[$("camCorner").value] : (calib.offset != null ? calib.offset : 0); c = s.out - b0; $("camBias").textContent = fmt(b0) + (bias[$("camCorner").value]!=null?" (reused)":(calib.offset!=null?" (from calibration)":"")); }
   if(c!=null && s.floor!=null) c -= s.floor;
   $("camResult").textContent = fmt(c);
   specLine("camSpec", c, $("camCorner").value.endsWith("F") ? spec.camF : spec.camR, spec.tolA, "°");
@@ -550,17 +650,84 @@ $("toeSave").addEventListener("click", ()=> addLog(($("toeAxle").value==="F"?"Fr
 let adjBuf = [];
 listeners.add((a,g,dt) => {
   if(!$("tab-adjust").classList.contains("on")) return;
-  const corner = $("adjCorner").value; const b = bias[corner]||0; const fl = (cam[corner]&&cam[corner].floor)||0;
+  const corner = $("adjCorner").value; const b = bias[corner]!=null ? bias[corner] : (calib.offset!=null ? calib.offset : 0); const fl = (cam[corner]&&cam[corner].floor)||0;
   const sm = parseFloat($("adjSmooth").value)||0; const now = performance.now();
   adjBuf.push([now, tiltZ(a) - b - fl]); while(adjBuf.length && now - adjBuf[0][0] > sm*1000) adjBuf.shift();
   const v = adjBuf.reduce((x,y)=>x+y[1],0)/adjBuf.length;
   const tgt = corner.endsWith("F") ? spec.camF : spec.camR; const d = v - tgt; const ok = Math.abs(d) <= spec.tolA;
   $("adjLive").textContent = fmt(v); $("adjLive").style.color = ok ? "var(--good)" : "var(--ink)";
   $("adjTarget").textContent = fmt(tgt) + "°"; $("adjDelta").textContent = fmt(d) + "°" + (ok ? " in spec" : (d>0 ? " (needs more negative)" : " (needs more positive)"));
-  $("adjCorr").textContent = fmt(b) + " / " + fmt(fl) + (bias[corner]==null ? " (no flip yet!)" : "");
+  $("adjCorr").textContent = fmt(b) + " / " + fmt(fl) + (bias[corner]==null ? (calib.offset!=null ? " (calibration offset)" : " (no flip yet!)") : "");
   const pct = Math.max(0, Math.min(100, 50 + d/1.5*50)); $("adjBar").style.width = pct + "%"; $("adjBar").style.background = ok ? "var(--good)" : "var(--mark)";
 });
 $("adjCorner").addEventListener("change", ()=>{ adjBuf=[]; });
+
+// ---------- calibration ----------
+function calSave(){ store.set("calib", calib); calSummary(); }
+function calSummary(){
+  const set = (id, txt, cls) => { const e=$(id); e.textContent = txt; e.className = cls||""; };
+  if(calib.flatUp!=null && calib.flatDown!=null){ const w = Math.max(Math.abs(calib.flatUp), Math.abs(calib.flatDown)); set("sumAcc", w<0.3 ? "OK, worst " + w.toFixed(2) + "°" : "offset " + w.toFixed(2) + "°, flip cancels it", w<0.3?"ok":"warn"); }
+  if(calib.offset!=null){ set("sumOff", fmt(calib.offset) + "° (spread " + (calib.offsetSpread||0).toFixed(3) + ")", (calib.offsetSpread||0)<0.05?"ok":"warn"); }
+  if(calib.gyroBias){ set("sumGyro", calib.gyroBias.map(v=>v.toFixed(3)).join(" / ") + ", drift " + (calib.gyroDrift||0).toFixed(3) + "°/min", Math.abs(calib.gyroDrift||0)<0.5?"ok":"warn"); }
+  if(calib.laps && calib.laps.length){ const worst = Math.max(...calib.laps.map(Math.abs)); set("sumLap", worst<0.1 ? "yes, worst lap " + worst.toFixed(3) + "°" : (worst<0.25 ? "marginal, worst lap " + worst.toFixed(3) + "°" : "no, worst lap " + worst.toFixed(3) + "°, use strings"), worst<0.1?"ok":"warn"); }
+  // restore displays
+  $("calUpV").textContent = fmt(calib.flatUp); $("calDownV").textContent = fmt(calib.flatDown);
+  if(calib.flatUp!=null && calib.flatDown!=null){ $("calFlatV").textContent = (Math.max(Math.abs(calib.flatUp),Math.abs(calib.flatDown))<0.3 ? "good" : "large offset, still fine with the flip"); }
+  const pairs = calib.pairs||[]; $("calPairs").textContent = pairs.length ? pairs.map(p=>fmt(p.angle)+" / "+fmt(p.off)).join("; ") : "--";
+  if(pairs.length>=2){ const a = pairs.map(p=>p.angle); $("calPairSpread").textContent = (Math.max(...a)-Math.min(...a)).toFixed(3) + "°"; }
+  $("calOffset").textContent = fmt(calib.offset);
+  if(calib.gyroBias){ $("calGyroB").textContent = calib.gyroBias.map(v=>v.toFixed(3)).join(" / "); $("calGyroD").textContent = (calib.gyroDrift||0).toFixed(3) + "°/min"; }
+  if(calib.laps){ $("calLaps").textContent = calib.laps.map(v=>fmt(v,3)).join("; "); $("calLapV").textContent = $("sumLap").textContent; }
+}
+// A. flat
+const flatAngle = a => Math.acos(Math.min(1, Math.abs(a[2]/norm(a))))*r2d * (a[2]>=0?1:-1);
+$("calUp").addEventListener("click", async () => { const v = await average(a=>flatAngle(a), avgSec()); beep(); calib.flatUp = v; addCapture("calib", {step:"flatUp"}, v, lastSamples); calSave(); });
+$("calDown").addEventListener("click", async () => { const v = await average(a=>flatAngle(a), avgSec()); beep(); calib.flatDown = v; addCapture("calib", {step:"flatDown"}, v, lastSamples); calSave(); });
+// B. pairs
+$("calPair").addEventListener("click", async () => {
+  const out = await average(a=>tiltZ(a), avgSec()); beep(); const sOut = lastSamples;
+  await countdown(parseFloat($("setCount").value)||3);
+  const inn = await average(a=>tiltZ(a), avgSec()); beep();
+  const pair = {angle:(out-inn)/2, off:(out+inn)/2, out, in:inn};
+  calib.pairs = (calib.pairs||[]).concat([pair]).slice(-5);
+  const offs = calib.pairs.map(p=>p.off); calib.offset = offs.reduce((x,y)=>x+y,0)/offs.length;
+  const angs = calib.pairs.map(p=>p.angle); calib.offsetSpread = angs.length>1 ? Math.max(...angs)-Math.min(...angs) : 0;
+  addCapture("calib", {step:"pair", pair}, pair.angle, sOut.concat(lastSamples)); calSave();
+});
+$("calPairClear").addEventListener("click", () => { calib.pairs=[]; calib.offset=null; calib.offsetSpread=0; $("calPairSpread").textContent="--"; calSave(); });
+// C. gyro still
+$("calGyro").addEventListener("click", () => {
+  const raw=[]; let tt=0; const sum=[0,0,0]; let n=0;
+  $("calGyroS").textContent = "recording";
+  const fn=(a,g,dt)=>{ tt+=dt; n++; for(let i=0;i<3;i++) sum[i]+=g[i]; raw.push([+tt.toFixed(4), ...a.map(v=>+v.toFixed(4)), ...g.map(v=>+v.toFixed(4))]); $("calGyroS").textContent = "recording " + tt.toFixed(1) + " s";
+    if(tt>=20){ listeners.delete(fn); const b = sum.map(v=>v/n); calib.gyroBias = b;
+      // drift: integrate bias-removed vertical rate over the record using first-half bias vs second-half
+      const half = Math.floor(raw.length/2); const b1=[0,0,0], b2=[0,0,0]; for(let i=0;i<half;i++){ for(let k=0;k<3;k++) b1[k]+=raw[i][4+k]/half; } for(let i=half;i<raw.length;i++){ for(let k=0;k<3;k++) b2[k]+=raw[i][4+k]/(raw.length-half); }
+      const up = (()=>{ const m=norm(acc); return [acc[0]/m,acc[1]/m,acc[2]/m]; })();
+      const dv = (b2[0]-b1[0])*up[0]+(b2[1]-b1[1])*up[1]+(b2[2]-b1[2])*up[2]; // deg/s change between halves (10 s apart)
+      calib.gyroDrift = dv*60; // deg/min equivalent of bias wander
+      $("calGyroS").textContent = "done, " + raw.length + " samples"; beep();
+      addCapture("calib", {step:"gyroStill", bias:b, drift:calib.gyroDrift}, null, raw); calSave(); } };
+  listeners.add(fn);
+});
+// D. carry test (reuses toe integrator)
+let lapOn = false, lapT0 = 0;
+$("calLapStart").addEventListener("click", async () => {
+  integrating = false; $("calLapS").textContent = "hold still";
+  gyroBias = [await average((a,g)=>g[0],1.5), await average((a,g)=>g[1],1.5), await average((a,g)=>g[2],1.5)];
+  upA = (()=>{ const m=norm(acc); return [acc[0]/m,acc[1]/m,acc[2]/m]; })();
+  q=[1,0,0,0]; resB=null; toeRaw=[]; toeT=0; tStart=performance.now(); integrating=true; lapOn=true; beep(); $("calLapS").textContent = "walking, come back to the same spot";
+});
+$("calLapEnd").addEventListener("click", () => {
+  if(!lapOn) return; lapOn=false; integrating=false;
+  const h = headingOf(q); const err = h.yaw; const n = norm(acc); const upB = qrot(q,[acc[0]/n,acc[1]/n,acc[2]/n]);
+  const tiltErr = Math.acos(Math.max(-1,Math.min(1, upB[0]*upA[0]+upB[1]*upA[1]+upB[2]*upA[2])))*r2d;
+  calib.laps = (calib.laps||[]).concat([err]).slice(-5);
+  $("calLapS").textContent = "lap " + ((performance.now()-tStart)/1000).toFixed(1) + " s, heading error " + fmt(err,3) + "°, tilt error " + tiltErr.toFixed(2) + "°";
+  addCapture("calib", {step:"lap", err, tiltErr, seconds:(performance.now()-tStart)/1000, gyroBias, upA}, err, toeRaw); calSave(); beep();
+});
+$("calReset").addEventListener("click", () => { if(confirm("Reset calibration?")){ calib={}; store.set("calib",calib); ["calUpV","calDownV","calFlatV","calPairs","calPairSpread","calOffset","calGyroS","calGyroB","calGyroD","calLapS","calLaps","calLapV"].forEach(i=>$(i).textContent="--"); ["sumAcc","sumOff","sumGyro","sumLap"].forEach(i=>{ $(i).textContent="not run"; $(i).className=""; }); } });
+calSummary();
 
 // ---------- strings ----------
 function strCompute(){
@@ -592,6 +759,13 @@ $("strSave").addEventListener("click", () => { const r = strCompute(); ["LF","RF
 $("raw5").addEventListener("click", ()=>startRaw(5));
 $("raw20").addEventListener("click", ()=>startRaw(20));
 $("exportBtn").addEventListener("click", exportSession);
+$("ghRepo").value = gh.repo || "fkandaya/miata-align"; $("ghToken").value = gh.token || "";
+$("ghRepo").addEventListener("input", ()=>{ gh.repo = $("ghRepo").value.trim(); store.set("gh", gh); });
+$("ghToken").addEventListener("input", ()=>{ gh.token = $("ghToken").value.trim(); store.set("gh", gh); ghStatus(gh.token ? "token saved on this phone" : "not configured"); });
+ghStatus(gh.token ? "token saved on this phone" : "not configured");
+if(gh.last){ $("ghLast").textContent = "Last upload: " + gh.last; }
+$("ghUpload").addEventListener("click", ()=>ghUploadSession(null));
+$("calUpload").addEventListener("click", ()=>ghUploadSession($("calUploadS")));
 $("capClear").addEventListener("click", ()=>{ if(confirm("Clear stored captures?")){ captures=[]; store.set("captures",captures); $("capCount").textContent="0"; } });
 $("capCount").textContent = captures.length;
 specTurnNote();
