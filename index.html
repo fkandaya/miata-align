@@ -312,8 +312,8 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
   <div class="panel">
     <p class="sub" style="margin:0 0 6px">Vehicle spec (targets). Results show green inside tolerance.</p>
     <div class="grid2">
-      <label>Front camber <input class="spec" data-k="camF" type="number" step="0.05" value="-1.75"></label>
-      <label>Rear camber <input class="spec" data-k="camR" type="number" step="0.05" value="-1.75"></label>
+      <label>Front camber <input class="spec" data-k="camF" type="number" step="0.05" value="-1.5"></label>
+      <label>Rear camber <input class="spec" data-k="camR" type="number" step="0.05" value="-1.8"></label>
       <label>Front caster <input class="spec" data-k="cas" type="number" step="0.1" value="5.0"></label>
       <label>Camber/caster tol ± <input class="spec" data-k="tolA" type="number" step="0.05" value="0.15"></label>
       <label>Front total toe (in) <input class="spec" data-k="toeF" type="number" step="0.01" value="0.03"></label>
@@ -321,6 +321,8 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
       <label>Toe tol ± (in) <input class="spec" data-k="tolT" type="number" step="0.01" value="0.03"></label>
       <label>Cross camber tol ± <input class="spec" data-k="tolX" type="number" step="0.05" value="0.25"></label>
     </div>
+    <div class="row" style="margin-top:8px"><button class="quiet" id="specLoad">Load recommended street spec</button></div>
+    <p class="sub" style="margin:4px 0 0">-1.50 / -1.80 camber, 5.00 caster, 0.03 front and 0.09 rear total toe, tolerances 0.15° and 0.03 in.</p>
   </div>
   <div class="panel">
     <p class="sub" style="margin:0 0 6px">Adjuster math. Tie rod: toe change per wheel per full turn. Both EST until measured; the app reports what to turn and you confirm with the next capture.</p>
@@ -469,7 +471,7 @@ async function startRaw(seconds){
 let calib = store.get("calib", {});
 
 // ---------- spec profile ----------
-const specDefaults = {camF:-1.75, camR:-1.75, cas:5.0, tolA:0.15, toeF:0.03, toeR:0.09, tolT:0.03, tolX:0.25, pitch:1.25, arm:125};
+const specDefaults = {camF:-1.5, camR:-1.8, cas:5.0, tolA:0.15, toeF:0.03, toeR:0.09, tolT:0.03, tolX:0.25, pitch:1.25, arm:125};
 let spec = Object.assign({}, specDefaults, store.get("spec", {}));
 document.querySelectorAll(".spec").forEach(i => { i.value = spec[i.dataset.k]; i.addEventListener("input", () => { spec[i.dataset.k] = parseFloat(i.value); store.set("spec", spec); specTurnNote(); camCompute && camCompute(); casCompute && casCompute(); strCompute && strCompute(); }); });
 const toeDegPerTurn = () => Math.atan(spec.pitch/spec.arm)*r2d; // per wheel
@@ -780,6 +782,7 @@ $("ghToken").addEventListener("input", ()=>{ gh.token = $("ghToken").value.trim(
 ghStatus(gh.token ? "token saved on this phone" : "not configured");
 if(gh.last){ $("ghLast").textContent = "Last upload: " + gh.last; }
 $("ghUpload").addEventListener("click", ()=>ghUploadSession(null));
+$("specLoad").addEventListener("click", ()=>{ Object.assign(spec, specDefaults); store.set("spec", spec); document.querySelectorAll(".spec").forEach(i => { i.value = spec[i.dataset.k]; }); specTurnNote(); camCompute(); casCompute(); strCompute(); });
 $("calUpload").addEventListener("click", ()=>ghUploadSession($("calUploadS")));
 $("capClear").addEventListener("click", ()=>{ if(confirm("Clear stored captures?")){ captures=[]; store.set("captures",captures); $("capCount").textContent="0"; } });
 $("capCount").textContent = captures.length;
