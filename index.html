@@ -61,6 +61,7 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
   <button role="tab" aria-selected="true" data-tab="live">Live</button>
   <button role="tab" data-tab="camber">Camber</button>
   <button role="tab" data-tab="caster">Caster</button>
+  <button role="tab" data-tab="adjust">Adjust</button>
   <button role="tab" data-tab="toe">Toe (gyro)</button>
   <button role="tab" data-tab="strings">Toe (strings)</button>
   <button role="tab" data-tab="log">Log</button>
@@ -80,6 +81,15 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
     </table>
   </div>
   <div class="row"><button class="act" id="btnEnable">Enable sensors</button></div>
+  <div class="panel">
+    <p class="sub" style="margin:0 0 6px">Raw recorder: saves the sensor stream for review.</p>
+    <div class="row"><input id="rawNote" placeholder="What is happening (flat screen up, wall lean, lap)"></div>
+    <div class="grid2">
+      <button class="quiet" id="raw5">Record 5 s</button>
+      <button class="quiet" id="raw20">Record 20 s</button>
+    </div>
+    <p class="sub" id="rawStatus" style="margin:6px 0 0">idle</p>
+  </div>
   <p class="sub">Table test: lay the phone flat screen up, then screen down. The flat check should stay near 0 on both. A constant offset is normal and the camber flip cancels it.</p>
 </section>
 
@@ -107,6 +117,7 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
   </div>
   <div class="readout"><span id="camResult">--</span><small>° camber</small></div>
   <p class="sub" id="camNote">Negative = top of wheel leans in.</p>
+  <p class="sub" id="camSpec"></p>
   <div class="row"><button class="act" id="camSave" disabled>Save to log</button></div>
 </section>
 
@@ -132,6 +143,7 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
     </table>
   </div>
   <div class="readout"><span id="casResult">--</span><small>° caster</small></div>
+  <p class="sub" id="casSpec"></p>
   <p class="sub">Uses the phone offset from the Camber tab if that corner was flipped today. Steer angle comes from the gyro, so do the sweep without pausing for more than a minute.</p>
   <div class="row"><button class="act" id="casSave" disabled>Save to log</button></div>
 </section>
@@ -161,8 +173,27 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
   </div>
   <div class="readout"><span id="toeResult">--</span><small>° total toe</small></div>
   <p class="sub" id="toeInches">Positive = toe in. Drift-corrected using the loop closure.</p>
+  <p class="sub" id="toeSpec"></p>
   <p class="sub">Experimental. Repeat three times; if the results spread more than 0.1°, trust the strings instead.</p>
   <div class="row"><button class="act" id="toeSave" disabled>Save to log</button></div>
+</section>
+
+<section id="tab-adjust">
+  <div class="row">
+    <select id="adjCorner"><option>LF</option><option>RF</option><option>LR</option><option>RR</option></select>
+    <label style="margin:0;flex:1">Smoothing (s) <input id="adjSmooth" type="number" value="1" step="0.5" min="0" max="3"></label>
+  </div>
+  <p class="sub">Live camber with the phone offset and floor correction from the Camber tab applied. Flip that corner once first, then leave the phone screen out and turn the bolt.</p>
+  <div class="readout"><span id="adjLive">--</span><small>° camber</small></div>
+  <div class="meter" style="height:14px;position:relative"><i id="adjBar" style="width:0"></i><span id="adjTick" style="position:absolute;top:-4px;width:2px;height:22px;background:var(--ink);left:50%"></span></div>
+  <div class="panel">
+    <table>
+      <tr><td>Target</td><td id="adjTarget">--</td></tr>
+      <tr><td>Delta to target</td><td id="adjDelta">--</td></tr>
+      <tr><td>Applied offset / floor</td><td id="adjCorr">--</td></tr>
+    </table>
+  </div>
+  <p class="sub">Bar spans target ± 1.5°. Green when inside the tolerance from Setup.</p>
 </section>
 
 <section id="tab-strings">
@@ -181,6 +212,8 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
       <tr><td>Front total toe</td><td id="strFT">--</td></tr>
       <tr><td>Rear total toe</td><td id="strRT">--</td></tr>
       <tr><td>Rear thrust angle</td><td id="strThrust">--</td></tr>
+      <tr><td>Front vs spec</td><td id="strSpecF">--</td></tr>
+      <tr><td>Rear vs spec</td><td id="strSpecR">--</td></tr>
     </table>
   </div>
   <p class="sub">Toe per wheel is positive when the rear gap is larger than the front gap (wheel points in). Thrust angle positive = rear axle steers left.</p>
@@ -194,6 +227,13 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
     <button class="quiet" id="logCopy">Copy as text</button>
     <button class="quiet" id="logClear">Clear log</button>
   </div>
+  <div class="panel">
+    <p class="sub" style="margin:0 0 6px">Session export: every capture with its raw samples (<span id="capCount">0</span> stored). Share it to Claude for review.</p>
+    <div class="grid2">
+      <button class="act" id="exportBtn">Export session</button>
+      <button class="quiet" id="capClear">Clear captures</button>
+    </div>
+  </div>
 </section>
 
 <section id="tab-setup">
@@ -201,14 +241,25 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
   <label>Averaging time per capture (s) <input id="setAvg" type="number" step="0.5" value="2" min="1" max="5"></label>
   <label>Countdown before screen-in capture (s) <input id="setCount" type="number" step="1" value="3" min="0" max="10"></label>
   <div class="panel">
-    <p class="sub" style="margin:0">Targets to work toward (street, 245s, manual steering):</p>
-    <table>
-      <tr><td>Front camber</td><td>-1.5 to -2.0°</td></tr>
-      <tr><td>Front caster</td><td>4.5 to 5.5°</td></tr>
-      <tr><td>Front total toe</td><td>0 to +1/16"</td></tr>
-      <tr><td>Rear camber</td><td>-1.5 to -2.0°</td></tr>
-      <tr><td>Rear total toe</td><td>+1/16 to +1/8"</td></tr>
-    </table>
+    <p class="sub" style="margin:0 0 6px">Vehicle spec (targets). Results show green inside tolerance.</p>
+    <div class="grid2">
+      <label>Front camber <input class="spec" data-k="camF" type="number" step="0.05" value="-1.75"></label>
+      <label>Rear camber <input class="spec" data-k="camR" type="number" step="0.05" value="-1.75"></label>
+      <label>Front caster <input class="spec" data-k="cas" type="number" step="0.1" value="5.0"></label>
+      <label>Camber/caster tol ± <input class="spec" data-k="tolA" type="number" step="0.05" value="0.15"></label>
+      <label>Front total toe (in) <input class="spec" data-k="toeF" type="number" step="0.01" value="0.03"></label>
+      <label>Rear total toe (in) <input class="spec" data-k="toeR" type="number" step="0.01" value="0.09"></label>
+      <label>Toe tol ± (in) <input class="spec" data-k="tolT" type="number" step="0.01" value="0.03"></label>
+      <label>Cross camber tol ± <input class="spec" data-k="tolX" type="number" step="0.05" value="0.25"></label>
+    </div>
+  </div>
+  <div class="panel">
+    <p class="sub" style="margin:0 0 6px">Adjuster math. Tie rod: toe change per wheel per full turn. Both EST until measured; the app reports what to turn and you confirm with the next capture.</p>
+    <div class="grid2">
+      <label>Tie rod thread (mm/turn) <input class="spec" data-k="pitch" type="number" step="0.05" value="1.25"></label>
+      <label>Steering arm length (mm) <input class="spec" data-k="arm" type="number" step="1" value="125"></label>
+    </div>
+    <p class="sub" id="specTurn" style="margin:6px 0 0"></p>
   </div>
   <p class="sub">Jig convention: phone portrait, top up, screen facing away from the car. The phone's x axis then points toward the rear on the left side and toward the front on the right side. Flipping for the camber reversal is a rotation about the long axis so the screen faces the wheel.</p>
 </section>
@@ -264,10 +315,11 @@ const tiltZ = a => Math.asin(Math.max(-1,Math.min(1, a[2]/norm(a)))) * r2d;
 const rollY = a => Math.asin(Math.max(-1,Math.min(1, a[1]/norm(a)))) * r2d;
 
 // average a quantity for N seconds; returns promise of mean
+let lastSamples = [];
 function average(getter, seconds, onProgress){
   return new Promise(res => {
-    let sum = 0, n = 0, tt = 0;
-    const fn = (a,g,dt) => { sum += getter(a,g); n++; tt += dt; if(onProgress) onProgress(Math.min(1, tt/seconds)); if(tt >= seconds){ listeners.delete(fn); res(sum/n); } };
+    let sum = 0, n = 0, tt = 0; const raw = [];
+    const fn = (a,g,dt) => { sum += getter(a,g); n++; tt += dt; raw.push([+tt.toFixed(4), ...a.map(v=>+v.toFixed(4)), ...g.map(v=>+v.toFixed(4))]); if(onProgress) onProgress(Math.min(1, tt/seconds)); if(tt >= seconds){ listeners.delete(fn); lastSamples = raw; res(sum/n); } };
     listeners.add(fn);
     setTimeout(() => { if(listeners.has(fn)){ listeners.delete(fn); res(n? sum/n : NaN); } }, seconds*1000 + 1500);
   });
@@ -275,6 +327,50 @@ function average(getter, seconds, onProgress){
 const countdown = s => new Promise(res => setTimeout(res, s*1000));
 const avgSec = () => parseFloat($("setAvg").value)||2;
 function beep(){ try{ const c = new (window.AudioContext||window.webkitAudioContext)(); const o = c.createOscillator(); o.frequency.value = 880; o.connect(c.destination); o.start(); o.stop(c.currentTime+0.15);}catch(e){} }
+
+// ---------- captures (raw data for review) ----------
+let captures = store.get("captures", []);
+function addCapture(type, meta, result, samples){
+  captures.push({t:new Date().toISOString(), type, meta, result, samples});
+  if(captures.length > 60) captures = captures.slice(-60);
+  store.set("captures", captures);
+  const el = $("capCount"); if(el) el.textContent = captures.length;
+}
+async function exportSession(){
+  const data = { exported:new Date().toISOString(), ua:navigator.userAgent, rateHz, settings:{dia:$("setDia").value, avg:$("setAvg").value, count:$("setCount").value}, log, captures };
+  const blob = new Blob([JSON.stringify(data)], {type:"application/json"});
+  const name = "miata-align-" + new Date().toISOString().slice(0,16).replace(/[:T]/g,"-") + ".json";
+  const file = new File([blob], name, {type:"application/json"});
+  try{ if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file], title:"Miata Align session"}); return; } }catch(e){ if(e.name==="AbortError") return; }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+// raw recorder (Live tab)
+let recRaw = null;
+function startRaw(seconds){
+  const raw = []; let tt = 0;
+  const fn = (a,g,dt) => { tt += dt; raw.push([+tt.toFixed(4), ...a.map(v=>+v.toFixed(4)), ...g.map(v=>+v.toFixed(4))]); $("rawStatus").textContent = "recording " + tt.toFixed(1) + " s"; if(tt >= seconds){ listeners.delete(fn); addCapture("raw", {note:$("rawNote").value, seconds}, null, raw); $("rawStatus").textContent = "saved " + raw.length + " samples"; beep(); } };
+  listeners.add(fn);
+}
+
+// ---------- spec profile ----------
+const specDefaults = {camF:-1.75, camR:-1.75, cas:5.0, tolA:0.15, toeF:0.03, toeR:0.09, tolT:0.03, tolX:0.25, pitch:1.25, arm:125};
+let spec = Object.assign({}, specDefaults, store.get("spec", {}));
+document.querySelectorAll(".spec").forEach(i => { i.value = spec[i.dataset.k]; i.addEventListener("input", () => { spec[i.dataset.k] = parseFloat(i.value); store.set("spec", spec); specTurnNote(); camCompute && camCompute(); casCompute && casCompute(); strCompute && strCompute(); }); });
+const toeDegPerTurn = () => Math.atan(spec.pitch/spec.arm)*r2d; // per wheel
+function specTurnNote(){ $("specTurn").textContent = "One full tie rod turn = about " + toeDegPerTurn().toFixed(2) + "° per wheel (" + (Math.tan(toeDegPerTurn()*d2r)*(parseFloat($("setDia").value)||16)).toFixed(3) + " in at the toe diameter)."; }
+function specLine(el, value, target, tol, unit, extra){
+  const e = $(el); if(!e) return;
+  if(value==null || isNaN(value)){ e.textContent=""; e.className="sub"; return; }
+  const d = value - target; const ok = Math.abs(d) <= tol;
+  e.textContent = "Target " + fmt(target,2) + unit + ", delta " + fmt(d,2) + unit + (ok ? ", in spec" : ", out of spec") + (extra ? ". " + extra : "");
+  e.className = "sub " + (ok ? "ok" : "warn");
+}
+function toeAdvice(totalDeg, targetIn, dia){
+  const targetDeg = Math.atan(targetIn/dia)*r2d; const d = targetDeg - totalDeg; // needed change in total toe (deg)
+  const turnsPerWheel = (d/2)/toeDegPerTurn();
+  if(Math.abs(turnsPerWheel) < 0.02) return "no change";
+  return (d>0 ? "add toe in: " : "add toe out: ") + Math.abs(turnsPerWheel).toFixed(2) + " turn each side (EST)";
+}
 
 // ---------- live ----------
 let flatRef = null;
@@ -318,6 +414,7 @@ function camCompute(){
   else if(s.out!=null){ c = s.out - (bias[$("camCorner").value]||0); $("camBias").textContent = fmt(bias[$("camCorner").value]) + (bias[$("camCorner").value]!=null?" (reused)":""); }
   if(c!=null && s.floor!=null) c -= s.floor;
   $("camResult").textContent = fmt(c);
+  specLine("camSpec", c, $("camCorner").value.endsWith("F") ? spec.camF : spec.camR, spec.tolA, "°");
   $("camNote").textContent = c==null ? "Negative = top of wheel leans in." : (s.in==null ? "Single reading, offset " + (bias[$("camCorner").value]!=null?"reused.":"unknown. Flip for the real number.") : "Flipped reading.") + (s.floor==null ? " No floor correction." : " Floor corrected.");
   $("camSave").disabled = c==null; $("camSave").dataset.v = c;
   store.set("cam", cam);
@@ -330,6 +427,7 @@ async function camCapture(key){
   // floor roll: phone flat, top edge toward centerline. Normal tilting outward = positive, so floor = -rollY.
   const v = key==="floor" ? -(await average(a=>rollY(a), avgSec(), prog)) : await average(a=>tiltZ(a), avgSec(), prog);
   beep(); camState()[key] = v; camCompute();
+  addCapture("camber", {corner:$("camCorner").value, key}, v, lastSamples);
   setTimeout(()=>$("camMeter").style.width="0", 500);
 }
 $("capFloor").addEventListener("click", ()=>camCapture("floor"));
@@ -355,6 +453,7 @@ $("casZero").addEventListener("click", async () => { steerOn=false; $("casSteer"
 async function casCapture(side){
   const v = await average(a=>tiltZ(a), avgSec());
   cas[side] = v - (bias[$("casCorner").value]||0); beep(); casCompute();
+  addCapture("caster", {corner:$("casCorner").value, side, steer:+steer.toFixed(2), sweep:$("casSweep").value, bias:bias[$("casCorner").value]||0}, cas[side], lastSamples);
 }
 function casCompute(){
   $("casL").textContent = fmt(cas.L); $("casR").textContent = fmt(cas.R);
@@ -364,7 +463,7 @@ function casCompute(){
     const diff = $("casCorner").value==="LF" ? (cas.L - cas.R) : (cas.R - cas.L);
     c = Math.atan(diff*d2r/(2*Math.sin(sw)))*r2d; // small-angle exact form
   }
-  $("casResult").textContent = fmt(c); $("casSave").disabled = c==null; $("casSave").dataset.v = c;
+  $("casResult").textContent = fmt(c); specLine("casSpec", c, spec.cas, spec.tolA, "°"); $("casSave").disabled = c==null; $("casSave").dataset.v = c;
 }
 $("casLeft").addEventListener("click", ()=>casCapture("L"));
 $("casRight").addEventListener("click", ()=>casCapture("R"));
@@ -383,8 +482,10 @@ function qrot(qq, v){ // rotate v by q
   const [w,x,y,z] = qq; const vq = [0,v[0],v[1],v[2]];
   const r = qmul(qmul(qq, vq), [w,-x,-y,-z]); return [r[1],r[2],r[3]];
 }
+let toeRaw = [], toeT = 0;
 listeners.add((a,g,dt) => {
   if(!integrating || dt<=0) return;
+  toeT += dt; toeRaw.push([+toeT.toFixed(4), ...a.map(v=>+v.toFixed(4)), ...g.map(v=>+v.toFixed(4))]);
   const wx=(g[0]-gyroBias[0])*d2r, wy=(g[1]-gyroBias[1])*d2r, wz=(g[2]-gyroBias[2])*d2r;
   const mag = Math.hypot(wx,wy,wz); if(mag<1e-9) return;
   const h = mag*dt/2, s = Math.sin(h)/mag;
@@ -408,7 +509,7 @@ $("toeStart").addEventListener("click", async () => {
   integrating = false; setToe("toeHeading","hold still");
   gyroBias = [await average((a,g)=>g[0],1.5), await average((a,g)=>g[1],1.5), await average((a,g)=>g[2],1.5)];
   upA = (() => { const n = norm(acc); return [acc[0]/n, acc[1]/n, acc[2]/n]; })();
-  q=[1,0,0,0]; resB=null; tStart=performance.now(); integrating=true; beep();
+  q=[1,0,0,0]; resB=null; tStart=performance.now(); integrating=true; beep(); toeRaw=[]; toeT=0; window.__toeEvents=[];
   setToe("toeBias", gyroBias.map(v=>v.toFixed(3)).join(" / ")); setToe("toeTime","--"); setToe("toeTiltErr","--"); setToe("toeLoop","--"); setToe("toeRaw","--"); setToe("toeResult","--");
 });
 $("toeCapB").addEventListener("click", async () => {
@@ -421,7 +522,7 @@ $("toeCapB").addEventListener("click", async () => {
   // on the left wheel (A) the device x axis points rearward, so forward = -e2. Normals ideally opposite: c = -1.
   // total toe-in positive when the right wheel's normal tilts forward: s < 0 in this basis.
   const toeRaw = Math.atan2(-h.s, -h.c)*r2d;
-  resB = {toeRaw, tB, tiltErr}; beep();
+  resB = {toeRaw, tB, tiltErr}; beep(); window.__toeEvents.push({ev:"captureB", t:+toeT.toFixed(3), tB, tiltErr, toeRaw, q:qB});
   setToe("toeTime",(tB/1000).toFixed(1)+" s"); setToe("toeTiltErr", fmt(tiltErr,2)+"°"); setToe("toeRaw", fmt(toeRaw,2)+"°");
   showToe(toeRaw);
 });
@@ -432,15 +533,34 @@ $("toeClose").addEventListener("click", () => {
   const corr = resB.toeRaw - loop*(resB.tB/tC); // toeRaw = yaw_B - 180, so drift accumulated by B is subtracted
   setToe("toeLoop", fmt(loop,2)+"° over "+(tC/1000).toFixed(1)+" s");
   showToe(corr, true);
+  addCapture("toe", {axle:$("toeAxle").value, gyroBias, upA, events:window.__toeEvents, loop, tC, corrected:corr}, corr, toeRaw);
 });
 function showToe(v, corrected){
   const dia = parseFloat($("setDia").value)||16;
   setToe("toeResult", fmt(v,2));
   $("toeInches").textContent = (corrected? "Drift-corrected. " : "Raw (close the loop to correct drift). ") + "Positive = toe in. " + fmt(Math.tan(v*d2r)*dia,3) + " in at " + dia + " in.";
   $("toeSave").disabled = false; $("toeSave").dataset.v = v;
+  const tIn = Math.tan(v*d2r)*dia, tgt = $("toeAxle").value==="F" ? spec.toeF : spec.toeR;
+  specLine("toeSpec", tIn, tgt, spec.tolT, " in", $("toeAxle").value==="F" ? toeAdvice(v, tgt, dia) : "");
 }
 $("toeClear").addEventListener("click", ()=>{ integrating=false; resB=null; q=[1,0,0,0]; ["toeHeading","toeBias","toeTime","toeTiltErr","toeLoop","toeRaw","toeResult"].forEach(i=>setToe(i,"--")); $("toeSave").disabled=true; });
 $("toeSave").addEventListener("click", ()=> addLog(($("toeAxle").value==="F"?"Front":"Rear")+" total toe (gyro)", fmt(parseFloat($("toeSave").dataset.v))+"°"));
+
+// ---------- live adjust ----------
+let adjBuf = [];
+listeners.add((a,g,dt) => {
+  if(!$("tab-adjust").classList.contains("on")) return;
+  const corner = $("adjCorner").value; const b = bias[corner]||0; const fl = (cam[corner]&&cam[corner].floor)||0;
+  const sm = parseFloat($("adjSmooth").value)||0; const now = performance.now();
+  adjBuf.push([now, tiltZ(a) - b - fl]); while(adjBuf.length && now - adjBuf[0][0] > sm*1000) adjBuf.shift();
+  const v = adjBuf.reduce((x,y)=>x+y[1],0)/adjBuf.length;
+  const tgt = corner.endsWith("F") ? spec.camF : spec.camR; const d = v - tgt; const ok = Math.abs(d) <= spec.tolA;
+  $("adjLive").textContent = fmt(v); $("adjLive").style.color = ok ? "var(--good)" : "var(--ink)";
+  $("adjTarget").textContent = fmt(tgt) + "°"; $("adjDelta").textContent = fmt(d) + "°" + (ok ? " in spec" : (d>0 ? " (needs more negative)" : " (needs more positive)"));
+  $("adjCorr").textContent = fmt(b) + " / " + fmt(fl) + (bias[corner]==null ? " (no flip yet!)" : "");
+  const pct = Math.max(0, Math.min(100, 50 + d/1.5*50)); $("adjBar").style.width = pct + "%"; $("adjBar").style.background = ok ? "var(--good)" : "var(--mark)";
+});
+$("adjCorner").addEventListener("change", ()=>{ adjBuf=[]; });
 
 // ---------- strings ----------
 function strCompute(){
@@ -459,12 +579,25 @@ function strCompute(){
   $("strRT").textContent = rt==null?"--": fmt(rt,2)+"° ("+fmt(Math.tan(rt*d2r)*span,3)+'")';
   const th = (toe.LR!=null&&toe.RR!=null) ? (toe.RR-toe.LR)/2 : null; // rear axle steering left when RR toes in more than LR
   $("strThrust").textContent = th==null?"--": fmt(th,2)+"°";
+  const sp = (t, tgt, isF) => { if(t==null) return "--"; const tin = Math.tan(t*d2r)*span, d = tin - tgt, ok = Math.abs(d) <= spec.tolT; return (ok?"OK ":"OUT ") + fmt(d,3) + '"' + (isF ? ", " + toeAdvice(t, tgt, span) : ""); };
+  $("strSpecF").textContent = sp(ft, spec.toeF, true); $("strSpecF").className = ft!=null && Math.abs(Math.tan(ft*d2r)*span-spec.toeF)<=spec.tolT ? "ok":"warn";
+  $("strSpecR").textContent = sp(rt, spec.toeR, false); $("strSpecR").className = rt!=null && Math.abs(Math.tan(rt*d2r)*span-spec.toeR)<=spec.tolT ? "ok":"warn";
   store.set("str", {span, unit, vals:[...document.querySelectorAll(".strF,.strR")].map(i=>i.value)});
   return {ft, rt, th, toe};
 }
 document.querySelectorAll(".strF,.strR,#strSpan,#strUnit").forEach(i => i.addEventListener("input", strCompute));
 (() => { const s = store.get("str"); if(s){ $("strSpan").value=s.span; $("strUnit").value=s.unit; [...document.querySelectorAll(".strF,.strR")].forEach((i,k)=>i.value=s.vals[k]||""); } strCompute(); })();
 $("strSave").addEventListener("click", () => { const r = strCompute(); ["LF","RF","LR","RR"].forEach(w => { if(r.toe[w]!=null) addLog(w+" toe (strings)", fmt(r.toe[w],2)+"°"); }); if(r.th!=null) addLog("Thrust angle", fmt(r.th,2)+"°"); });
+
+$("raw5").addEventListener("click", ()=>startRaw(5));
+$("raw20").addEventListener("click", ()=>startRaw(20));
+$("exportBtn").addEventListener("click", exportSession);
+$("capClear").addEventListener("click", ()=>{ if(confirm("Clear stored captures?")){ captures=[]; store.set("captures",captures); $("capCount").textContent="0"; } });
+$("capCount").textContent = captures.length;
+specTurnNote();
+$("setDia").addEventListener("input", specTurnNote);
+// hide the enable button once data flows
+listeners.add(()=>{ const b=$("btnEnable"); if(b && !b.hidden) b.hidden=true; });
 
 })();
 </script>
