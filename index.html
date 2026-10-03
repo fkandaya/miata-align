@@ -79,7 +79,7 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
       <tr><td>Accel x / y / z (m/s²)</td><td id="liveAcc">--</td></tr>
       <tr><td>Gyro x / y / z (°/s)</td><td id="liveGyro">--</td></tr>
       <tr><td>Rate</td><td id="liveRate">--</td></tr>
-      <tr><td>Flat-table check (should read 0 ± 0.1 both ways up)</td><td id="liveFlat">--</td></tr>
+      <tr><td>Tilt from flat (any face)</td><td id="liveFlat">--</td></tr>
     </table>
   </div>
   <div class="row"><button class="act" id="btnEnable">Enable sensors</button></div>
@@ -92,14 +92,14 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
     </div>
     <p class="sub" id="rawStatus" style="margin:6px 0 0">idle</p>
   </div>
-  <p class="sub">Table test: lay the phone flat screen up, then screen down. The flat check should stay near 0 on both. A constant offset is normal and the camber flip cancels it.</p>
+  <p class="sub">Screen up is not flat on this phone because of the camera bump, so flat checks are done screen down. Use the Calibrate tab for the proper test.</p>
 </section>
 
 <section id="tab-camber">
   <div class="row">
     <select id="camCorner"><option>LF</option><option>RF</option><option>LR</option><option>RR</option></select>
   </div>
-  <div class="step"><b>1</b>Floor: phone flat on the slip plate, screen up, top edge toward the car centerline. Capture.</div>
+  <div class="step"><b>1</b>Floor: phone flat on the slip plate, screen down, top edge toward the car centerline. Capture.</div>
   <div class="step"><b>2</b>Phone in the jig, screen out. Capture.</div>
   <div class="step"><b>3</b>Flip the phone in the jig, screen toward the wheel. Capture (3 s countdown).</div>
   <div class="grid2">
@@ -244,14 +244,14 @@ th:first-child,td:first-child{text-align:left;color:var(--dim)}
   <p class="sub">Four checks, no car needed. Results are saved and used as defaults. Phone bare, screen on, nothing touching the table.</p>
 
   <div class="panel">
-    <p class="sub" style="margin:0 0 6px"><b>A. Flat check.</b> Phone flat on a table, screen up, capture. Flip it screen down, capture.</p>
+    <p class="sub" style="margin:0 0 6px"><b>A. Flat check.</b> Phone flat on a table, screen down (the camera bump makes screen up useless). Capture. Spin it 180° on the table, still screen down, capture. The two readings cancel the table tilt and leave the sensor offset.</p>
     <div class="grid2">
-      <button class="quiet" id="calUp">Capture screen up</button>
-      <button class="quiet" id="calDown">Capture screen down</button>
+      <button class="quiet" id="calUp">Capture screen down</button>
+      <button class="quiet" id="calDown">Capture turned 180°</button>
     </div>
     <table style="margin-top:6px">
-      <tr><td>Screen up</td><td id="calUpV">--</td></tr>
-      <tr><td>Screen down</td><td id="calDownV">--</td></tr>
+      <tr><td>Screen down</td><td id="calUpV">--</td></tr>
+      <tr><td>Turned 180°</td><td id="calDownV">--</td></tr>
       <tr><td>Verdict</td><td id="calFlatV">--</td></tr>
     </table>
   </div>
@@ -693,13 +693,13 @@ $("adjCorner").addEventListener("change", ()=>{ adjBuf=[]; });
 function calSave(){ store.set("calib", calib); calSummary(); }
 function calSummary(){
   const set = (id, txt, cls) => { const e=$(id); e.textContent = txt; e.className = cls||""; };
-  if(calib.flatUp!=null && calib.flatDown!=null){ const w = Math.max(Math.abs(calib.flatUp), Math.abs(calib.flatDown)); set("sumAcc", w<0.3 ? "OK, worst " + w.toFixed(2) + "°" : "offset " + w.toFixed(2) + "°, flip cancels it", w<0.3?"ok":"warn"); }
+  if(calib.flatUp!=null && calib.flatDown!=null){ const w = Math.abs(calib.flatUp - calib.flatDown)/2; set("sumAcc", w<0.3 ? "OK, sensor offset about " + w.toFixed(2) + "°" : "sensor offset about " + w.toFixed(2) + "°, flip cancels it", w<0.3?"ok":"warn"); }
   if(calib.offset!=null){ set("sumOff", fmt(calib.offset) + "° (spread " + (calib.offsetSpread||0).toFixed(3) + ")", (calib.offsetSpread||0)<0.05?"ok":"warn"); }
   if(calib.gyroBias){ set("sumGyro", calib.gyroBias.map(v=>v.toFixed(3)).join(" / ") + ", drift " + (calib.gyroDrift||0).toFixed(3) + "°/min", Math.abs(calib.gyroDrift||0)<0.5?"ok":"warn"); }
   if(calib.laps && calib.laps.length){ const worst = Math.max(...calib.laps.map(Math.abs)); set("sumLap", worst<0.1 ? "yes, worst lap " + worst.toFixed(3) + "°" : (worst<0.25 ? "marginal, worst lap " + worst.toFixed(3) + "°" : "no, worst lap " + worst.toFixed(3) + "°, use strings"), worst<0.1?"ok":"warn"); }
   // restore displays
   $("calUpV").textContent = fmt(calib.flatUp); $("calDownV").textContent = fmt(calib.flatDown);
-  if(calib.flatUp!=null && calib.flatDown!=null){ $("calFlatV").textContent = (Math.max(Math.abs(calib.flatUp),Math.abs(calib.flatDown))<0.3 ? "good" : "large offset, still fine with the flip"); }
+  if(calib.flatUp!=null && calib.flatDown!=null){ const w = Math.abs(calib.flatUp - calib.flatDown)/2; $("calFlatV").textContent = (w<0.3 ? "good" : "large offset, still fine with the flip") + ", table tilt about " + ((calib.flatUp + calib.flatDown)/2).toFixed(2) + "°"; }
   const pairs = calib.pairs||[]; $("calPairs").textContent = pairs.length ? pairs.map(p=>fmt(p.angle)+" / "+fmt(p.off)).join("; ") : "--";
   if(pairs.length>=2){ const a = pairs.map(p=>p.angle); $("calPairSpread").textContent = (Math.max(...a)-Math.min(...a)).toFixed(3) + "°"; }
   $("calOffset").textContent = fmt(calib.offset);
@@ -707,7 +707,7 @@ function calSummary(){
   if(calib.laps){ $("calLaps").textContent = calib.laps.map(v=>fmt(v,3)).join("; "); $("calLapV").textContent = $("sumLap").textContent; }
 }
 // A. flat
-const flatAngle = a => Math.acos(Math.min(1, Math.abs(a[2]/norm(a))))*r2d * (a[2]>=0?1:-1);
+const flatAngle = a => Math.acos(Math.min(1, Math.abs(a[2]/norm(a))))*r2d;
 $("calUp").addEventListener("click", async () => { const v = await timedCapture(a=>flatAngle(a), delaySec()); calib.flatUp = v; addCapture("calib", {step:"flatUp"}, v, lastSamples); calSave(); });
 $("calDown").addEventListener("click", async () => { const v = await timedCapture(a=>flatAngle(a), delaySec()); calib.flatDown = v; addCapture("calib", {step:"flatDown"}, v, lastSamples); calSave(); });
 // B. pairs
